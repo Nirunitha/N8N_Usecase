@@ -1,0 +1,207 @@
+{
+  "name": "GitHub PR → Grok Review → Postgres",
+  "nodes": [
+    {
+      "parameters": {
+        "functionCode": "return [{markdown:`### Review for ${$json.file_name}\\n\\n${$json.issues}\\n\\nOptimized Code:\\n${$json.optimized_code}`}];"
+      },
+      "name": "Format Markdown",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [-112, -432],
+      "id": "23be8037-bbdd-4169-abab-dc44955486ec",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "table": "ai_reviews",
+        "columns": ["file_name", "issues", "savings_pct", "optimized_code"],
+        "additionalFields": {}
+      },
+      "name": "Postgres Insert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [112, -416],
+      "id": "f3ff7f54-39a6-4cc7-87a2-28f22b5ae986",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/nirunitha/N8N_Usecase/pulls/{{$json.body.pull_request.number}}/files\n",
+        "options": {}
+      },
+      "id": "390f3abf-2d41-492e-b67f-fbe2ddffacd6",
+      "name": "Get PR Files (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [-992, -32]
+    },
+    {
+      "parameters": {
+        "url": "={{$json[0].raw_url}}",
+        "responseFormat": "string",
+        "options": {}
+      },
+      "id": "e6454f3d-6d5a-4697-96a7-24730eaa1da5",
+      "name": "Download File Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [-736, -32]
+    },
+    {
+      "parameters": {
+        "functionCode": "const content = ($json.data || '').replace(/[\\x00-\\x1F]/g, (c) => {\n  if (c === '\\n' || c === '\\r' || c === '\\t') return c;\n  return ' ';\n});\n\nreturn [{\n  model: 'gpt-4o-mini',\n  messages: [\n    {\n      role: 'system',\n      content: 'You are an expert SQL code reviewer. Provide a structured review in this format:\\n\\n| Issue Type | Line(s) | Severity | Description | Recommendation |\\n|------------|---------|----------|-------------|----------------|\\n\\nThen add \"Optimized Code\" section. Severity: Critical/High/Medium/Low/Info.'\n    },\n    {\n      role: 'user',\n      content: content\n    }\n  ],\n  stream: false\n}];"
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Prepare API Payload",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [-520, -32]
+    },
+    {
+      "parameters": {
+        "functionCode": "const reviewText = $json.choices[0].message.content;\nconst htmlContent = `\n<html>\n<head>\n<style>\ntable{border-collapse:collapse;width:100%;margin:20px 0}\nth,td{border:1px solid #ddd;padding:12px;text-align:left}\nth{background-color:#4CAF50;color:white}\ntr:nth-child(even){background-color:#f2f2f2}\npre{background-color:#f4f4f4;padding:10px;border-radius:5px;overflow-x:auto}\n</style>\n</head>\n<body>\n<h2>Code Review Results</h2>\n${reviewText.replace(/\\n/g, '<br>')}\n</body>\n</html>\n`;\n\nreturn [{\n  pr_number: $items('GitHub Trigger1')[0].json.body.pull_request.number,\n  review_text: htmlContent,\n  cost: $json.usage,\n  created_at: new Date().toISOString()\n}];"
+      },
+      "id": "6aa3b260-14d8-4da2-aebc-f7e61944710c",
+      "name": "Format DB Payload",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [-32, -32]
+    },
+    {
+      "parameters": {
+        "url": "https://YOUR_POSTGREST_ENDPOINT/review_results",
+        "jsonParameters": true,
+        "options": {},
+        "headerParametersJson": "{\"Authorization\":\"Bearer YOUR_POSTGREST_TOKEN\",\"Content-Type\":\"application/json\"}"
+      },
+      "id": "fc8523a4-0341-4ce6-8483-e4838fec5841",
+      "name": "Insert Into Postgres (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [432, -32],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "owner": {
+          "__rl": true,
+          "value": "Nirunitha",
+          "mode": "list",
+          "cachedResultName": "Nirunitha",
+          "cachedResultUrl": "https://github.com/Nirunitha"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "N8N_Usecase",
+          "mode": "list",
+          "cachedResultName": "N8N_Usecase",
+          "cachedResultUrl": "https://github.com/Nirunitha/N8N_Usecase"
+        },
+        "events": ["pull_request"],
+        "options": {}
+      },
+      "id": "d6382a56-c3bb-4605-ab84-9a6634d0059a",
+      "name": "GitHub Trigger1",
+      "type": "n8n-nodes-base.githubTrigger",
+      "typeVersion": 1,
+      "position": [-1248, -32],
+      "webhookId": "2f068fb1-54a8-47e9-a26a-d413fb62a58d",
+      "credentials": {
+        "githubApi": {
+          "id": "uKU3q9Dt2RULIA6k",
+          "name": "Nirunitha Github"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [-304, -48],
+      "id": "3d8bdd18-dc5d-43a7-b742-34deb36ab8bb",
+      "name": "StarCoder Code Review",
+      "retryOnFail": true,
+      "maxTries": 5
+    },
+    {
+      "parameters": {
+        "fromEmail": "nirunitha.selvarajan@epsilon.com",
+        "toEmail": "nirunitha.selvarajan@epsilon.com,savitha.maipady@epsilon.com",
+        "subject": "Code Review Results",
+        "html": "={{ $json.review_text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [176, -32],
+      "id": "8e1e29b2-d843-4cf1-9e10-b0e5a6db32d2",
+      "name": "Send email",
+      "webhookId": "be6c0c62-3b46-48f3-9d51-e1914be3ab36",
+      "credentials": {
+        "smtp": {
+          "id": "YTBZ33okVm07TNwV",
+          "name": "shared-smtp-server"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Format Markdown": {
+      "main": [[{"node": "Postgres Insert", "type": "main", "index": 0}]]
+    },
+    "Get PR Files (API)": {
+      "main": [[{"node": "Download File Content", "type": "main", "index": 0}]]
+    },
+    "Download File Content": {
+      "main": [[{"node": "Prepare API Payload", "type": "main", "index": 0}]]
+    },
+    "Prepare API Payload": {
+      "main": [[{"node": "StarCoder Code Review", "type": "main", "index": 0}]]
+    },
+    "Format DB Payload": {
+      "main": [[{"node": "Send email", "type": "main", "index": 0}]]
+    },
+    "GitHub Trigger1": {
+      "main": [[{"node": "Get PR Files (API)", "type": "main", "index": 0}]]
+    },
+    "StarCoder Code Review": {
+      "main": [[{"node": "Format DB Payload", "type": "main", "index": 0}]]
+    },
+    "Send email": {
+      "main": [[{"node": "Insert Into Postgres (API)", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "94f209b4-3856-4207-8de7-01017ea3ea4b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a232119f3221083d53e6be8a74c6f4c0ec58fca82e64a9eb0a27ae58047e7207"
+  },
+  "id": "YGKkioSQfw3ObS6f",
+  "tags": []
+}
